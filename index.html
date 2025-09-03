@@ -213,7 +213,13 @@
 
         function speak(text) {
             if (!text || !audioUnlocked) return;
-            synth.cancel();
+             if (synth.speaking) {
+                synth.cancel();
+            }
+            // Resume audio context if it was suspended by the browser
+            if (synth.state === 'suspended') {
+                synth.resume();
+            }
             const utterThis = new SpeechSynthesisUtterance(text);
             if (selectedVoice) utterThis.voice = selectedVoice;
             utterThis.rate = 0.7; // Adjusted speech rate to 70%
@@ -221,11 +227,17 @@
         }
         
         function unlockAudio() {
-            if (audioUnlocked) return;
+            if (audioUnlocked) {
+                if (synth.state === 'suspended') synth.resume();
+                return;
+            };
             const silentSound = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhIAAAAAA=";
             const audio = new Audio(silentSound);
-            audio.play().catch(e => console.warn("Audio unlock failed, will try again."));
-            audioUnlocked = true;
+            audio.play().then(() => {
+                audioUnlocked = true;
+                // Resume synth just in case it was suspended.
+                synth.resume();
+            }).catch(e => console.warn("Audio unlock failed, will try again."));
         }
 
         // --- TOAST NOTIFICATION ---
@@ -484,6 +496,7 @@
             
             // --- IN-GAME ACTIONS ---
             document.getElementById('start-game-btn').addEventListener('click', () => {
+                unlockAudio(); // Re-confirm audio unlock right before game starts
                 updateDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`), { 
                     gameState: 'round', firstCorrectAnswerGiven: false 
                 });
