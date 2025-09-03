@@ -157,7 +157,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
         import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+        import { initializeAuth, inMemoryPersistence, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
         
         // --- YOUR FIREBASE CONFIG ---
         const firebaseConfig = {
@@ -174,7 +174,8 @@
         // --- FIREBASE INITIALIZATION ---
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-        const auth = getAuth(app);
+        // Use in-memory persistence to avoid IndexedDB storage issues on some browsers/settings
+        const auth = initializeAuth(app, { persistence: inMemoryPersistence });
 
         // --- DOM ELEMENTS ---
         const screens = document.querySelectorAll('.screen');
@@ -530,6 +531,7 @@
     </script>
 </body>
 </html>
+
 
 
 
