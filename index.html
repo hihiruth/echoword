@@ -238,7 +238,7 @@
                     if (timeLeft <= 0) {
                         clearInterval(roundTimer);
                         roundTimer = null;
-                        // Host updates the game state to show the leaderboard
+                        
                         const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
                         const gameDocSnap = await getDoc(gameRef);
                         if (gameDocSnap.exists() && gameDocSnap.data().gameState === 'round') {
@@ -262,7 +262,6 @@
                     showScreen('join-setup-screen');
                     document.getElementById('game-code-input').value = joinCode.toUpperCase();
                     document.getElementById('player-name-input').focus();
-                    // Clean the URL so the link isn't accidentally shared
                     window.history.replaceState({}, document.title, window.location.pathname);
                 }
             } catch (e) {
@@ -301,7 +300,7 @@
                     hostId: currentUserId,
                     gameCode: gameCode,
                     words: words,
-                    gameState: 'lobby', // lobby, round, leaderboard, finished
+                    gameState: 'lobby',
                     currentRound: 0,
                     createdAt: new Date()
                 });
@@ -387,13 +386,27 @@
                 playersUnsubscribe = onSnapshot(collection(db, `artifacts/${appId}/public/data/games/${gameId}/players`), (snapshot) => {
                     const players = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     updatePlayersUI(players);
+
+                    // --- NEW: AUTO-ADVANCE LOGIC ---
+                    if (isHost && players.length > 0) {
+                        const allAnswered = players.every(p => p.answered);
+                        const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
+                        getDoc(gameRef).then(gameDocSnap => {
+                            if (gameDocSnap.exists() && gameDocSnap.data().gameState === 'round' && allAnswered) {
+                                if (roundTimer) {
+                                    clearInterval(roundTimer);
+                                    roundTimer = null;
+                                }
+                                updateDoc(gameRef, { gameState: 'leaderboard' });
+                            }
+                        });
+                    }
                 });
             }
 
             // --- UI UPDATERS ---
             function updateGameUI(gameData) {
-                // Clear any running timer whenever the game state changes.
-                if (roundTimer) {
+                if (gameData.gameState !== 'round' && roundTimer) {
                     clearInterval(roundTimer);
                     roundTimer = null;
                 }
@@ -414,7 +427,7 @@
                     if(isHost) {
                         document.getElementById('host-round-number').textContent = gameData.currentRound + 1;
                         speak(gameData.words[gameData.currentRound]);
-                        startRoundTimer(); // Start the timer for the host
+                        startRoundTimer();
                     } else {
                         renderPlayerCards(gameData.words, gameData.words[gameData.currentRound]);
                     }
@@ -506,7 +519,7 @@
                 
                 const scoreIncrement = isCorrect ? 10 : 0;
                 const playerDoc = await getDoc(playerRef);
-                if (playerDoc.exists() && playerDoc.data().answered) return; // Prevent double submission
+                if (playerDoc.exists() && playerDoc.data().answered) return;
                 const currentScore = playerDoc.exists() ? playerDoc.data().score : 0;
                 
                 updateDoc(playerRef, {
