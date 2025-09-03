@@ -191,6 +191,42 @@
         let isInitialized = false; // Prevents re-initialization on auth token refresh
         let roundTimer = null; // To manage the round countdown
 
+        // --- SPEECH SYNTHESIS ---
+        const synth = window.speechSynthesis;
+        let voices = [];
+        let selectedVoice = null;
+
+        function loadVoices() {
+            voices = synth.getVoices().filter(voice => voice.lang.startsWith('en'));
+            // A preference order for voices, making it more robust
+            selectedVoice = voices.find(v => v.name.includes('Google') && v.name.includes('US English')) ||
+                            voices.find(v => v.lang === 'en-US') ||
+                            voices[0];
+        }
+        
+        // Pre-warm the speech engine
+        loadVoices();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = loadVoices;
+        }
+
+        function speak(text) {
+            if (!text) return;
+            // Cancel any previous speech to prevent overlap
+            synth.cancel();
+
+            const utterThis = new SpeechSynthesisUtterance(text);
+            if (selectedVoice) {
+                utterThis.voice = selectedVoice;
+            }
+            utterThis.rate = 0.9;
+            
+            // A small delay to ensure cancel() has finished, preventing race conditions
+            setTimeout(() => {
+                synth.speak(utterThis);
+            }, 50); 
+        }
+
         // --- TOAST NOTIFICATION ---
         function showToast(message) {
             const toast = document.getElementById('toast-notification');
@@ -448,21 +484,22 @@
             }
 
             function updatePlayersUI(players) {
+                // Sort players and render podium for everyone
+                players.sort((a, b) => b.score - a.score);
+                renderPodium(players);
+
                 if(isHost) {
                     const lobbyList = document.getElementById('player-list-lobby');
                     lobbyList.innerHTML = players.map(p => `<div class="bg-white p-2 rounded shadow-sm">${p.name}</div>`).join('');
                     document.getElementById('player-count').textContent = players.length;
                     document.getElementById('start-game-btn').disabled = players.length === 0;
 
-                    players.sort((a, b) => b.score - a.score);
                     const leaderboardDiv = document.getElementById('leaderboard');
                     leaderboardDiv.innerHTML = players.map(p => `
                         <div class="flex justify-between items-center p-2 rounded ${p.isCorrect ? 'bg-green-100' : p.answered ? 'bg-red-100' : 'bg-white'}">
                             <span>${p.name}</span>
                             <span class="font-bold">${p.score}</span>
                         </div>`).join('');
-                    
-                    renderPodium(players);
                 }
             }
             
@@ -621,21 +658,6 @@
                 currentGameId = null;
                 currentPlayerId = null;
                 isHost = false;
-            }
-
-            // --- SPEECH SYNTHESIS ---
-            const synth = window.speechSynthesis;
-            function speak(text) {
-                if (!text || synth.speaking) return;
-                const utterThis = new SpeechSynthesisUtterance(text);
-                const voices = synth.getVoices().filter(voice => voice.lang.startsWith('en'));
-                const selectedVoice = voices.find(v => v.name === 'Google US English') || voices[0];
-                utterThis.voice = selectedVoice;
-                utterThis.rate = 0.9;
-                synth.speak(utterThis);
-            }
-            if (speechSynthesis.onvoiceschanged !== undefined) {
-                speechSynthesis.onvoiceschanged = speak;
             }
             
             document.getElementById('host-listen-btn').addEventListener('click', async () => {
