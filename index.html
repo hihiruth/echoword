@@ -144,7 +144,8 @@
         <div id="end-screen" class="screen text-center">
             <h2 class="text-4xl font-bold gradient-text mb-2">Game Over!</h2>
             <h3 class="font-bold text-xl mb-4">Final Results</h3>
-            <div id="final-leaderboard" class="space-y-2"></div>
+            <div id="podium-container" class="flex items-end justify-center gap-2 md:gap-4 h-64 mt-4"></div>
+            <div id="other-players-list" class="mt-6"></div>
             <button class="back-btn w-full mt-6 bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition">Play a New Game</button>
         </div>
 
@@ -156,7 +157,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, writeBatch, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
         import { initializeAuth, inMemoryPersistence, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
         
         // --- YOUR FIREBASE CONFIG ---
@@ -387,7 +388,6 @@
                     const players = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     updatePlayersUI(players);
 
-                    // --- NEW: AUTO-ADVANCE LOGIC ---
                     if (isHost && players.length > 0) {
                         const allAnswered = players.every(p => p.answered);
                         const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
@@ -461,18 +461,17 @@
                             <span>${p.name}</span>
                             <span class="font-bold">${p.score}</span>
                         </div>`).join('');
-                    const finalLeaderboardDiv = document.getElementById('final-leaderboard');
-                    finalLeaderboardDiv.innerHTML = players.map((p, i) => `
-                        <div class="flex justify-between items-center p-3 rounded ${i === 0 ? 'bg-yellow-200' : 'bg-gray-100'}">
-                            <span class="font-bold text-lg">${i+1}. ${p.name}</span>
-                            <span class="font-extrabold text-xl">${p.score}</span>
-                        </div>`).join('');
+                    
+                    renderPodium(players);
                 }
             }
             
             // --- IN-GAME ACTIONS ---
             document.getElementById('start-game-btn').addEventListener('click', () => {
-                updateDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`), { gameState: 'round' });
+                updateDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`), { 
+                    gameState: 'round',
+                    firstCorrectAnswerGiven: false 
+                });
             });
 
             document.getElementById('next-round-btn').addEventListener('click', async () => {
@@ -492,7 +491,8 @@
                     });
                     batch.update(gameRef, {
                         gameState: 'round',
-                        currentRound: gameData.currentRound + 1
+                        currentRound: gameData.currentRound + 1,
+                        firstCorrectAnswerGiven: false
                     });
                     await batch.commit();
                 }
@@ -515,22 +515,91 @@
             }
             
             async function submitAnswer(isCorrect, selectedCard) {
-                const playerRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}/players/${currentPlayerId}`);
-                
-                const scoreIncrement = isCorrect ? 10 : 0;
-                const playerDoc = await getDoc(playerRef);
-                if (playerDoc.exists() && playerDoc.data().answered) return;
-                const currentScore = playerDoc.exists() ? playerDoc.data().score : 0;
-                
-                updateDoc(playerRef, {
-                    answered: true,
-                    isCorrect: isCorrect,
-                    score: currentScore + scoreIncrement
-                });
-                
                 document.querySelectorAll('#player-word-cards .card').forEach(c => c.classList.add('disabled'));
                 selectedCard.classList.remove('disabled');
                 selectedCard.classList.add(isCorrect ? 'correct' : 'incorrect');
+
+                const playerRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}/players/${currentPlayerId}`);
+                const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
+
+                if (!isCorrect) {
+                    await updateDoc(playerRef, { answered: true, isCorrect: false });
+                    return;
+                }
+
+                try {
+                    await runTransaction(db, async (transaction) => {
+                        const playerDoc = await transaction.get(playerRef);
+                        const gameDoc = await transaction.get(gameRef);
+
+                        if (!playerDoc.exists() || !gameDoc.exists()) {
+                            throw "Game or player not found.";
+                        }
+                        if (playerDoc.data().answered) {
+                            return; // Already answered, do nothing.
+                        }
+
+                        const isFirst = !gameDoc.data().firstCorrectAnswerGiven;
+                        const scoreIncrement = isFirst ? 10 : 8;
+                        const newScore = playerDoc.data().score + scoreIncrement;
+
+                        if (isFirst) {
+                            transaction.update(gameRef, { firstCorrectAnswerGiven: true });
+                        }
+                        transaction.update(playerRef, {
+                            answered: true,
+                            isCorrect: true,
+                            score: newScore
+                        });
+                    });
+                } catch (error) {
+                    console.error("Transaction failed: ", error);
+                    showToast("Could not submit answer. Please try again.");
+                }
+            }
+
+            // --- PODIUM AND FINAL RESULTS ---
+            function renderPodium(sortedPlayers) {
+                const podiumContainer = document.getElementById('podium-container');
+                const otherPlayersList = document.getElementById('other-players-list');
+                podiumContainer.innerHTML = '';
+                otherPlayersList.innerHTML = '';
+
+                const topThree = sortedPlayers.slice(0, 3);
+                const podiumOrder = [
+                    { player: topThree.find((p, i) => i === 1), rank: 2, color: 'bg-slate-400', height: 'h-40' },
+                    { player: topThree.find((p, i) => i === 0), rank: 1, color: 'bg-yellow-400', height: 'h-56' },
+                    { player: topThree.find((p, i) => i === 2), rank: 3, color: 'bg-orange-400', height: 'h-32' }
+                ];
+                
+                podiumContainer.innerHTML = podiumOrder.map(item => {
+                    if (!item.player) return `<div class="w-1/3"></div>`; // Empty spot if not enough players
+                    const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : '🥉';
+                    return `
+                        <div class="w-1/3 flex flex-col items-center justify-end">
+                            <p class="font-bold text-lg">${item.player.name}</p>
+                            <p class="text-xl">${medal}</p>
+                            <div class="${item.color} w-full rounded-t-lg flex items-center justify-center p-2 ${item.height}">
+                                <p class="text-2xl font-extrabold text-white">${item.player.score}</p>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                const otherPlayers = sortedPlayers.slice(3);
+                if (otherPlayers.length > 0) {
+                     otherPlayersList.innerHTML = `
+                        <h4 class="font-bold text-lg mb-2">Rest of the Players</h4>
+                        <div class="space-y-2">
+                            ${otherPlayers.map((p, i) => `
+                                <div class="flex justify-between items-center p-2 rounded bg-gray-100">
+                                    <span>${i + 4}. ${p.name}</span>
+                                    <span class="font-bold">${p.score}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
             }
 
             // --- UTILITIES ---
