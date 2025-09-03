@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echo Echo Word! - Multiplayer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            touch-action: manipulation;
+        }
+        .screen { display: none; }
+        .screen.active { display: block; }
+        .gradient-text {
+            background-image: linear-gradient(to right, #4f46e5, #9333ea);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        .card {
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card.selected {
+            transform: scale(1.05);
+            border-color: #6d28d9;
+            box-shadow: 0 0 0 4px rgba(109, 40, 217, 0.3);
+        }
+        .card.correct {
+            background-color: #22c55e;
+            color: white;
+        }
+        .card.incorrect {
+            background-color: #ef4444;
+            color: white;
+        }
+        .card.disabled {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+        @keyframes pop-in {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .pop-in { animation: pop-in 0.3s ease-out; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-100 via-indigo-100 to-purple-100 flex items-center justify-center min-h-screen p-4">
+
+    <div id="app" class="w-full max-w-2xl mx-auto bg-white rounded-2xl shadow-2xl p-6 md:p-8">
+
+        <!-- Home Screen -->
+        <div id="home-screen" class="screen active text-center">
+            <h1 class="text-4xl font-extrabold gradient-text mb-2">Echo Echo Word!</h1>
+            <p class="text-gray-600 mb-8 text-lg">The multiplayer listening game!</p>
+            <div class="space-y-4">
+                <button id="show-host-setup-btn" class="w-full bg-purple-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-purple-700 transition transform hover:scale-105 shadow-lg">Host a Game</button>
+                <button id="show-join-setup-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition transform hover:scale-105 shadow-lg">Join a Game</button>
+            </div>
+            <div class="mt-8 text-center text-sm text-gray-500">
+                <p>Created by Gemini</p>
+            </div>
+        </div>
+
+        <!-- Host: Word List Setup -->
+        <div id="host-setup-screen" class="screen">
+            <h2 class="text-3xl font-bold gradient-text mb-4">Host a Game</h2>
+            <p class="text-sm text-gray-500 mb-4">Enter a list of words separated by commas. You need at least 4 words.</p>
+            <textarea id="word-list" rows="6" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 transition" placeholder="e.g., apple, banana, elephant..."></textarea>
+            <p id="word-count-error" class="text-red-500 text-sm mt-2 hidden">Please enter at least 4 unique words.</p>
+            <button id="create-game-btn" class="w-full bg-purple-600 text-white font-bold py-3 px-4 rounded-lg mt-4 hover:bg-purple-700 transition transform hover:scale-105">Create Game</button>
+            <button class="back-btn w-full mt-2 text-gray-600">Back</button>
+        </div>
+
+        <!-- Host: Lobby -->
+        <div id="host-lobby-screen" class="screen text-center">
+            <h2 class="text-3xl font-bold gradient-text mb-2">Game Lobby</h2>
+            <p class="text-gray-500 mb-4">Players can join with the code below.</p>
+            <div class="bg-gray-100 p-4 rounded-lg mb-4">
+                <p class="text-lg font-semibold text-gray-600">Game Code:</p>
+                <p id="game-code-display" class="text-5xl font-extrabold text-purple-600 tracking-widest cursor-pointer" title="Click to copy"></p>
+            </div>
+            <div class="flex justify-center mb-4">
+                 <canvas id="qr-code"></canvas>
+            </div>
+            <h3 class="font-bold text-xl mb-2">Players Joined (<span id="player-count">0</span>)</h3>
+            <div id="player-list-lobby" class="min-h-[100px] bg-gray-50 rounded-lg p-3 space-y-2"></div>
+            <button id="start-game-btn" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-lg mt-4 hover:bg-green-600 transition transform hover:scale-105" disabled>Start Game</button>
+             <button class="back-btn w-full mt-2 text-gray-600">End Game & Go Back</button>
+        </div>
+        
+        <!-- Player: Join Setup -->
+        <div id="join-setup-screen" class="screen">
+            <h2 class="text-3xl font-bold gradient-text mb-4">Join a Game</h2>
+            <input type="text" id="player-name-input" placeholder="Enter your name" class="w-full p-3 border border-gray-300 rounded-lg mb-3 uppercase" maxlength="12">
+            <input type="text" id="game-code-input" placeholder="Enter Game Code" class="w-full p-3 border border-gray-300 rounded-lg uppercase tracking-widest" maxlength="6">
+            <p id="join-error" class="text-red-500 text-sm mt-2 hidden"></p>
+            <button id="join-game-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg mt-4 hover:bg-indigo-700 transition">Join Game</button>
+            <button class="back-btn w-full mt-2 text-gray-600">Back</button>
+        </div>
+
+        <!-- Player: Lobby -->
+        <div id="player-lobby-screen" class="screen text-center">
+             <h2 class="text-3xl font-bold gradient-text mb-2">You're In!</h2>
+             <p class="text-gray-600">Waiting for the host to start the game...</p>
+             <p class="mt-4 text-2xl font-bold" id="player-name-display"></p>
+        </div>
+        
+        <!-- Host & Player: Game Screen -->
+        <div id="game-screen" class="screen">
+            <!-- Host View -->
+            <div id="host-game-view" class="hidden text-center">
+                <p class="text-lg">Round <span id="host-round-number">1</span></p>
+                <h2 class="text-3xl font-bold mb-4">Listen to the word...</h2>
+                 <button id="host-listen-btn" class="bg-purple-100 text-purple-700 p-5 rounded-full hover:bg-purple-200 focus:outline-none focus:ring-4 focus:ring-purple-300 transition-all duration-300 transform hover:scale-110 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                </button>
+                <div id="timer-display" class="text-4xl font-bold text-red-500">10</div>
+            </div>
+            <!-- Player View -->
+            <div id="player-game-view" class="hidden">
+                 <p class="text-center text-lg mb-4">Listen... and choose the correct word!</p>
+                 <div id="player-word-cards" class="grid grid-cols-2 gap-4"></div>
+            </div>
+        </div>
+
+        <!-- Host: Round Results/Leaderboard Screen -->
+        <div id="leaderboard-screen" class="screen text-center">
+             <h2 class="text-3xl font-bold gradient-text mb-2">Round Over!</h2>
+             <p class="mb-4">The correct word was: <strong id="correct-word-display" class="text-purple-600"></strong></p>
+             <h3 class="font-bold text-xl mb-2">Leaderboard</h3>
+             <div id="leaderboard" class="space-y-2"></div>
+             <button id="next-round-btn" class="w-full bg-purple-600 text-white font-bold py-3 px-4 rounded-lg mt-4 hover:bg-purple-700 transition">Next Round</button>
+        </div>
+
+        <!-- Host & Player: End Screen -->
+        <div id="end-screen" class="screen text-center">
+            <h2 class="text-4xl font-bold gradient-text mb-2">Game Over!</h2>
+            <h3 class="font-bold text-xl mb-4">Final Results</h3>
+            <div id="final-leaderboard" class="space-y-2"></div>
+            <button class="back-btn w-full mt-6 bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition">Play a New Game</button>
+        </div>
+
+        <!-- Toast Notification -->
+        <div id="toast-notification" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-gray-800 text-white py-2 px-5 rounded-full text-sm shadow-lg">
+            <p id="toast-message"></p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+        
+        // --- YOUR FIREBASE CONFIG ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBZWq6GaX6_VmT015NlMEo3CCbccVnsxLM",
+            authDomain: "echo-echo-word.firebaseapp.com",
+            projectId: "echo-echo-word",
+            storageBucket: "echo-echo-word.firebasestorage.app",
+            messagingSenderId: "399365020067",
+            appId: "1:399365020067:web:ee6a2def0a8df472b6e216",
+            measurementId: "G-WQKLSR7EZF"
+        };
+        const appId = 'echo-echo-word'; // Using your project ID as the app identifier
+
+        // --- FIREBASE INITIALIZATION ---
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // --- DOM ELEMENTS ---
+        const screens = document.querySelectorAll('.screen');
+        
+        // --- GAME STATE ---
+        let currentUserId = null;
+        let currentGameId = null;
+        let currentPlayerId = null;
+        let gameUnsubscribe = null;
+        let playersUnsubscribe = null;
+        let isHost = false;
+        let isInitialized = false; // Prevents re-initialization on auth token refresh
+
+        // --- TOAST NOTIFICATION ---
+        function showToast(message) {
+            const toast = document.getElementById('toast-notification');
+            const toastMessage = document.getElementById('toast-message');
+            if (!toast || !toastMessage) return;
+            toastMessage.textContent = message;
+            toast.classList.remove('hidden');
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+
+        // --- AUTHENTICATION & APP START ---
+        onAuthStateChanged(auth, user => {
+            if (user && !isInitialized) {
+                isInitialized = true;
+                startApp(user.uid);
+            } else if (!user) {
+                signInAnonymously(auth).catch(error => {
+                    console.error("Anonymous sign in failed:", error);
+                    showToast("Error: Could not connect to game service.");
+                });
+            }
+        });
+
+        function startApp(uid) {
+            currentUserId = uid;
+
+            // --- UI NAVIGATION ---
+            function showScreen(screenId) {
+                screens.forEach(s => s.classList.remove('active'));
+                document.getElementById(screenId).classList.add('active');
+            }
+
+            // --- Handle Join Link on Page Load ---
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const joinCode = urlParams.get('join');
+                if (joinCode) {
+                    showScreen('join-setup-screen');
+                    document.getElementById('game-code-input').value = joinCode.toUpperCase();
+                    document.getElementById('player-name-input').focus();
+                    // Clean the URL so the link isn't accidentally shared
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                }
+            } catch (e) {
+                console.error("Could not process join link:", e);
+            }
+            
+
+            document.getElementById('show-host-setup-btn').addEventListener('click', () => showScreen('host-setup-screen'));
+            document.getElementById('show-join-setup-btn').addEventListener('click', () => showScreen('join-setup-screen'));
+            document.querySelectorAll('.back-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if(isHost && currentGameId) {
+                        await deleteGame(currentGameId);
+                    }
+                    resetLocalState();
+                    showScreen('home-screen');
+                });
+            });
+
+            // --- HOST LOGIC ---
+            const createGameBtn = document.getElementById('create-game-btn');
+            const wordListInput = document.getElementById('word-list');
+            const wordCountError = document.getElementById('word-count-error');
+
+            createGameBtn.addEventListener('click', async () => {
+                const words = [...new Set(wordListInput.value.split(',').map(w => w.trim().toLowerCase()).filter(Boolean))];
+                if(words.length < 4) {
+                    wordCountError.classList.remove('hidden');
+                    return;
+                }
+                wordCountError.classList.add('hidden');
+
+                isHost = true;
+                const gameCode = generateGameCode();
+                const gameRef = collection(db, `artifacts/${appId}/public/data/games`);
+                const gameDoc = await addDoc(gameRef, {
+                    hostId: currentUserId,
+                    gameCode: gameCode,
+                    words: words,
+                    gameState: 'lobby', // lobby, round, leaderboard, finished
+                    currentRound: 0,
+                    createdAt: new Date()
+                });
+                currentGameId = gameDoc.id;
+                listenToGame(currentGameId);
+                showScreen('host-lobby-screen');
+            });
+
+            async function deleteGame(gameId) {
+                const batch = writeBatch(db);
+                const playersRef = collection(db, `artifacts/${appId}/public/data/games/${gameId}/players`);
+                const playersSnapshot = await getDocs(playersRef);
+                playersSnapshot.forEach(playerDoc => {
+                    batch.delete(playerDoc.ref);
+                });
+                const gameRef = doc(db, `artifacts/${appId}/public/data/games/${gameId}`);
+                batch.delete(gameRef);
+                await batch.commit();
+            }
+
+            // --- PLAYER LOGIC ---
+            const joinGameBtn = document.getElementById('join-game-btn');
+            const playerNameInput = document.getElementById('player-name-input');
+            const gameCodeInput = document.getElementById('game-code-input');
+            const joinError = document.getElementById('join-error');
+            
+            joinGameBtn.addEventListener('click', async () => {
+                const playerName = playerNameInput.value.trim().toUpperCase();
+                const gameCode = gameCodeInput.value.trim().toUpperCase();
+
+                if(!playerName || !gameCode) {
+                    joinError.textContent = "Please enter your name and a game code.";
+                    joinError.classList.remove('hidden');
+                    return;
+                }
+
+                const gamesRef = collection(db, `artifacts/${appId}/public/data/games`);
+                const q = query(gamesRef, where("gameCode", "==", gameCode));
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    joinError.textContent = "Game not found. Check the code and try again.";
+                    joinError.classList.remove('hidden');
+                    return;
+                }
+                
+                const gameDoc = querySnapshot.docs[0];
+                if(gameDoc.data().gameState !== 'lobby') {
+                    joinError.textContent = "This game has already started.";
+                    joinError.classList.remove('hidden');
+                    return;
+                }
+
+                currentGameId = gameDoc.id;
+                const playersRef = collection(db, `artifacts/${appId}/public/data/games/${currentGameId}/players`);
+                const playerDoc = await addDoc(playersRef, {
+                    name: playerName,
+                    score: 0,
+                    answered: false,
+                    isCorrect: null
+                });
+                currentPlayerId = playerDoc.id;
+                listenToGame(currentGameId);
+                document.getElementById('player-name-display').textContent = playerName;
+                showScreen('player-lobby-screen');
+            });
+
+            // --- REAL-TIME LISTENERS ---
+            function listenToGame(gameId) {
+                if (gameUnsubscribe) gameUnsubscribe();
+                gameUnsubscribe = onSnapshot(doc(db, `artifacts/${appId}/public/data/games/${gameId}`), (doc) => {
+                    const gameData = doc.data();
+                    if (!gameData) {
+                        showToast("The host has ended the game.");
+                        resetLocalState();
+                        showScreen('home-screen');
+                        return;
+                    }
+                    updateGameUI(gameData);
+                });
+
+                if (playersUnsubscribe) playersUnsubscribe();
+                playersUnsubscribe = onSnapshot(collection(db, `artifacts/${appId}/public/data/games/${gameId}/players`), (snapshot) => {
+                    const players = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    updatePlayersUI(players);
+                });
+            }
+
+            // --- UI UPDATERS ---
+            function updateGameUI(gameData) {
+                if (gameData.gameState === 'lobby') {
+                    const joinLink = `${window.location.origin}${window.location.pathname}?join=${gameData.gameCode}`;
+                    document.getElementById('game-code-display').textContent = gameData.gameCode;
+                    new QRious({ element: document.getElementById('qr-code'), value: joinLink, size: 150 });
+                    document.getElementById('game-code-display').onclick = () => {
+                        navigator.clipboard.writeText(gameData.gameCode);
+                        showToast("Game code copied to clipboard!");
+                    };
+                }
+                if (gameData.gameState === 'round') {
+                    document.getElementById('host-game-view').style.display = isHost ? 'block' : 'none';
+                    document.getElementById('player-game-view').style.display = !isHost ? 'block' : 'none';
+                    
+                    if(isHost) {
+                        document.getElementById('host-round-number').textContent = gameData.currentRound + 1;
+                        speak(gameData.words[gameData.currentRound]);
+                    } else {
+                        renderPlayerCards(gameData.words, gameData.words[gameData.currentRound]);
+                    }
+                    showScreen('game-screen');
+                }
+                if(gameData.gameState === 'leaderboard') {
+                    if(isHost) {
+                        document.getElementById('correct-word-display').textContent = gameData.words[gameData.currentRound];
+                        const isLastRound = gameData.currentRound >= gameData.words.length - 1;
+                        const nextBtn = document.getElementById('next-round-btn');
+                        nextBtn.textContent = isLastRound ? 'Show Final Results' : 'Next Round';
+                        showScreen('leaderboard-screen');
+                    }
+                }
+                if(gameData.gameState === 'finished') {
+                    showScreen('end-screen');
+                }
+            }
+
+            function updatePlayersUI(players) {
+                if(isHost) {
+                    const lobbyList = document.getElementById('player-list-lobby');
+                    lobbyList.innerHTML = players.map(p => `<div class="bg-white p-2 rounded shadow-sm">${p.name}</div>`).join('');
+                    document.getElementById('player-count').textContent = players.length;
+                    document.getElementById('start-game-btn').disabled = players.length === 0;
+
+                    players.sort((a, b) => b.score - a.score);
+                    const leaderboardDiv = document.getElementById('leaderboard');
+                    leaderboardDiv.innerHTML = players.map(p => `
+                        <div class="flex justify-between items-center p-2 rounded ${p.isCorrect ? 'bg-green-100' : p.answered ? 'bg-red-100' : 'bg-white'}">
+                            <span>${p.name}</span>
+                            <span class="font-bold">${p.score}</span>
+                        </div>`).join('');
+                    const finalLeaderboardDiv = document.getElementById('final-leaderboard');
+                    finalLeaderboardDiv.innerHTML = players.map((p, i) => `
+                        <div class="flex justify-between items-center p-3 rounded ${i === 0 ? 'bg-yellow-200' : 'bg-gray-100'}">
+                            <span class="font-bold text-lg">${i+1}. ${p.name}</span>
+                            <span class="font-extrabold text-xl">${p.score}</span>
+                        </div>`).join('');
+                }
+            }
+            
+            // --- IN-GAME ACTIONS ---
+            document.getElementById('start-game-btn').addEventListener('click', () => {
+                updateDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`), { gameState: 'round' });
+            });
+
+            document.getElementById('next-round-btn').addEventListener('click', async () => {
+                const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
+                const gameDocSnap = await getDoc(gameRef);
+                const gameData = gameDocSnap.data();
+
+                const isLastRound = gameData.currentRound >= gameData.words.length - 1;
+                if(isLastRound) {
+                    updateDoc(gameRef, { gameState: 'finished' });
+                } else {
+                    const playersRef = collection(db, `artifacts/${appId}/public/data/games/${currentGameId}/players`);
+                    const batch = writeBatch(db);
+                    const playersSnapshot = await getDocs(playersRef);
+                    playersSnapshot.forEach(playerDoc => {
+                        batch.update(playerDoc.ref, { answered: false, isCorrect: null });
+                    });
+                    batch.update(gameRef, {
+                        gameState: 'round',
+                        currentRound: gameData.currentRound + 1
+                    });
+                    await batch.commit();
+                }
+            });
+
+            function renderPlayerCards(allWords, correctWord) {
+                const container = document.getElementById('player-word-cards');
+                container.innerHTML = '';
+                const otherWords = allWords.filter(w => w !== correctWord);
+                const options = shuffleArray(otherWords).slice(0, 3);
+                options.push(correctWord);
+                
+                shuffleArray(options).forEach(word => {
+                    const card = document.createElement('button');
+                    card.className = 'card w-full text-lg md:text-xl font-semibold p-6 rounded-lg border-2 border-gray-200 bg-white text-gray-700';
+                    card.textContent = word;
+                    card.onclick = () => submitAnswer(word === correctWord, card);
+                    container.appendChild(card);
+                });
+            }
+            
+            async function submitAnswer(isCorrect, selectedCard) {
+                const playerRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}/players/${currentPlayerId}`);
+                
+                const scoreIncrement = isCorrect ? 10 : 0;
+                const playerDoc = await getDoc(playerRef);
+                if (playerDoc.exists() && playerDoc.data().answered) return; // Prevent double submission
+                const currentScore = playerDoc.exists() ? playerDoc.data().score : 0;
+                
+                updateDoc(playerRef, {
+                    answered: true,
+                    isCorrect: isCorrect,
+                    score: currentScore + scoreIncrement
+                });
+                
+                document.querySelectorAll('#player-word-cards .card').forEach(c => c.classList.add('disabled'));
+                selectedCard.classList.remove('disabled');
+                selectedCard.classList.add(isCorrect ? 'correct' : 'incorrect');
+            }
+
+            // --- UTILITIES ---
+            function generateGameCode() {
+                return Math.random().toString(36).substring(2, 8).toUpperCase();
+            }
+            
+            function shuffleArray(array) {
+                for (let i = array.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [array[i], array[j]] = [array[j], array[i]];
+                }
+                return array;
+            }
+
+            function resetLocalState() {
+                if (gameUnsubscribe) gameUnsubscribe();
+                if (playersUnsubscribe) playersUnsubscribe();
+                currentGameId = null;
+                currentPlayerId = null;
+                isHost = false;
+            }
+
+            // --- SPEECH SYNTHESIS ---
+            const synth = window.speechSynthesis;
+            function speak(text) {
+                if (!text || synth.speaking) return;
+                const utterThis = new SpeechSynthesisUtterance(text);
+                const voices = synth.getVoices().filter(voice => voice.lang.startsWith('en'));
+                const selectedVoice = voices.find(v => v.name === 'Google US English') || voices[0];
+                utterThis.voice = selectedVoice;
+                utterThis.rate = 0.9;
+                synth.speak(utterThis);
+            }
+            if (speechSynthesis.onvoiceschanged !== undefined) {
+                speechSynthesis.onvoiceschanged = speak;
+            }
+            
+            document.getElementById('host-listen-btn').addEventListener('click', async () => {
+                const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
+                const gameDocSnap = await getDoc(gameRef);
+                const gameData = gameDocSnap.data();
+                if(gameData && gameData.gameState === 'round') {
+                    speak(gameData.words[gameData.currentRound]);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+
+
+
