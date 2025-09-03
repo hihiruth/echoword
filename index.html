@@ -122,7 +122,7 @@
                  <button id="host-listen-btn" class="bg-purple-100 text-purple-700 p-5 rounded-full hover:bg-purple-200 focus:outline-none focus:ring-4 focus:ring-purple-300 transition-all duration-300 transform hover:scale-110 mb-4">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
                 </button>
-                <div id="timer-display" class="text-4xl font-bold text-red-500">10</div>
+                <div id="timer-display" class="text-4xl font-bold">10</div>
             </div>
             <!-- Player View -->
             <div id="player-game-view" class="hidden">
@@ -188,6 +188,7 @@
         let playersUnsubscribe = null;
         let isHost = false;
         let isInitialized = false; // Prevents re-initialization on auth token refresh
+        let roundTimer = null; // To manage the round countdown
 
         // --- TOAST NOTIFICATION ---
         function showToast(message) {
@@ -216,6 +217,36 @@
 
         function startApp(uid) {
             currentUserId = uid;
+            
+            const ROUND_DURATION = 10;
+
+            // --- TIMER LOGIC ---
+            function startRoundTimer() {
+                if (roundTimer) clearInterval(roundTimer);
+
+                let timeLeft = ROUND_DURATION;
+                const timerDisplay = document.getElementById('timer-display');
+                timerDisplay.textContent = timeLeft;
+                timerDisplay.classList.remove('text-red-500'); // Reset color
+
+                roundTimer = setInterval(async () => {
+                    timeLeft--;
+                    timerDisplay.textContent = timeLeft;
+                    if (timeLeft <= 3) {
+                         timerDisplay.classList.add('text-red-500');
+                    }
+                    if (timeLeft <= 0) {
+                        clearInterval(roundTimer);
+                        roundTimer = null;
+                        // Host updates the game state to show the leaderboard
+                        const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
+                        const gameDocSnap = await getDoc(gameRef);
+                        if (gameDocSnap.exists() && gameDocSnap.data().gameState === 'round') {
+                            updateDoc(gameRef, { gameState: 'leaderboard' });
+                        }
+                    }
+                }, 1000);
+            }
 
             // --- UI NAVIGATION ---
             function showScreen(screenId) {
@@ -238,7 +269,6 @@
                 console.error("Could not process join link:", e);
             }
             
-
             document.getElementById('show-host-setup-btn').addEventListener('click', () => showScreen('host-setup-screen'));
             document.getElementById('show-join-setup-btn').addEventListener('click', () => showScreen('join-setup-screen'));
             document.querySelectorAll('.back-btn').forEach(btn => {
@@ -362,6 +392,12 @@
 
             // --- UI UPDATERS ---
             function updateGameUI(gameData) {
+                // Clear any running timer whenever the game state changes.
+                if (roundTimer) {
+                    clearInterval(roundTimer);
+                    roundTimer = null;
+                }
+
                 if (gameData.gameState === 'lobby') {
                     const joinLink = `${window.location.origin}${window.location.pathname}?join=${gameData.gameCode}`;
                     document.getElementById('game-code-display').textContent = gameData.gameCode;
@@ -378,6 +414,7 @@
                     if(isHost) {
                         document.getElementById('host-round-number').textContent = gameData.currentRound + 1;
                         speak(gameData.words[gameData.currentRound]);
+                        startRoundTimer(); // Start the timer for the host
                     } else {
                         renderPlayerCards(gameData.words, gameData.words[gameData.currentRound]);
                     }
@@ -531,7 +568,4 @@
     </script>
 </body>
 </html>
-
-
-
 
