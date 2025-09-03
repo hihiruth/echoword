@@ -65,7 +65,7 @@
                 <button id="show-join-setup-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition transform hover:scale-105 shadow-lg">Join a Game</button>
             </div>
             <div class="mt-8 text-center text-sm text-gray-500">
-                <p>Made by Ruth Yeh</p>
+                <p>Created by Gemini</p>
             </div>
         </div>
 
@@ -213,34 +213,19 @@
 
         function speak(text) {
             if (!text || !audioUnlocked) return;
-             if (synth.speaking) {
-                synth.cancel();
-            }
-            if (synth.state === 'suspended') {
-                synth.resume();
-            }
+            synth.cancel();
             const utterThis = new SpeechSynthesisUtterance(text);
             if (selectedVoice) utterThis.voice = selectedVoice;
-            utterThis.rate = 0.7; // Adjusted speech rate to 70%
+            utterThis.rate = 0.9;
             setTimeout(() => synth.speak(utterThis), 50); 
         }
         
-        async function unlockAudio() {
-            if (audioUnlocked && synth.state !== 'suspended') {
-                return;
-            }
-            if (synth.state === 'suspended') {
-                synth.resume();
-            }
+        function unlockAudio() {
+            if (audioUnlocked) return;
             const silentSound = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhIAAAAAA=";
             const audio = new Audio(silentSound);
-            try {
-                await audio.play();
-                audioUnlocked = true;
-                synth.resume();
-            } catch (e) {
-                console.warn("Audio unlock failed. A user interaction is required.");
-            }
+            audio.play().catch(e => console.warn("Audio unlock failed, will try again."));
+            audioUnlocked = true;
         }
 
         // --- TOAST NOTIFICATION ---
@@ -498,8 +483,7 @@
             }
             
             // --- IN-GAME ACTIONS ---
-            document.getElementById('start-game-btn').addEventListener('click', async () => {
-                await unlockAudio(); // Re-confirm audio unlock right before game starts
+            document.getElementById('start-game-btn').addEventListener('click', () => {
                 updateDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`), { 
                     gameState: 'round', firstCorrectAnswerGiven: false 
                 });
