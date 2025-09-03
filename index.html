@@ -216,7 +216,6 @@
              if (synth.speaking) {
                 synth.cancel();
             }
-            // Resume audio context if it was suspended by the browser
             if (synth.state === 'suspended') {
                 synth.resume();
             }
@@ -226,18 +225,22 @@
             setTimeout(() => synth.speak(utterThis), 50); 
         }
         
-        function unlockAudio() {
-            if (audioUnlocked) {
-                if (synth.state === 'suspended') synth.resume();
+        async function unlockAudio() {
+            if (audioUnlocked && synth.state !== 'suspended') {
                 return;
-            };
+            }
+            if (synth.state === 'suspended') {
+                synth.resume();
+            }
             const silentSound = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhIAAAAAA=";
             const audio = new Audio(silentSound);
-            audio.play().then(() => {
+            try {
+                await audio.play();
                 audioUnlocked = true;
-                // Resume synth just in case it was suspended.
                 synth.resume();
-            }).catch(e => console.warn("Audio unlock failed, will try again."));
+            } catch (e) {
+                console.warn("Audio unlock failed. A user interaction is required.");
+            }
         }
 
         // --- TOAST NOTIFICATION ---
@@ -495,8 +498,8 @@
             }
             
             // --- IN-GAME ACTIONS ---
-            document.getElementById('start-game-btn').addEventListener('click', () => {
-                unlockAudio(); // Re-confirm audio unlock right before game starts
+            document.getElementById('start-game-btn').addEventListener('click', async () => {
+                await unlockAudio(); // Re-confirm audio unlock right before game starts
                 updateDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`), { 
                     gameState: 'round', firstCorrectAnswerGiven: false 
                 });
