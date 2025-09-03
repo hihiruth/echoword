@@ -190,41 +190,42 @@
         let isHost = false;
         let isInitialized = false; // Prevents re-initialization on auth token refresh
         let roundTimer = null; // To manage the round countdown
+        let lastPlayedRound = -1;
+        let lastRenderedRound = -1;
 
-        // --- SPEECH SYNTHESIS ---
+        // --- SPEECH & AUDIO ---
         const synth = window.speechSynthesis;
         let voices = [];
         let selectedVoice = null;
+        let audioUnlocked = false;
 
         function loadVoices() {
             voices = synth.getVoices().filter(voice => voice.lang.startsWith('en'));
-            // A preference order for voices, making it more robust
             selectedVoice = voices.find(v => v.name.includes('Google') && v.name.includes('US English')) ||
                             voices.find(v => v.lang === 'en-US') ||
                             voices[0];
         }
         
-        // Pre-warm the speech engine
         loadVoices();
         if (speechSynthesis.onvoiceschanged !== undefined) {
             speechSynthesis.onvoiceschanged = loadVoices;
         }
 
         function speak(text) {
-            if (!text) return;
-            // Cancel any previous speech to prevent overlap
+            if (!text || !audioUnlocked) return;
             synth.cancel();
-
             const utterThis = new SpeechSynthesisUtterance(text);
-            if (selectedVoice) {
-                utterThis.voice = selectedVoice;
-            }
+            if (selectedVoice) utterThis.voice = selectedVoice;
             utterThis.rate = 0.9;
-            
-            // A small delay to ensure cancel() has finished, preventing race conditions
-            setTimeout(() => {
-                synth.speak(utterThis);
-            }, 50); 
+            setTimeout(() => synth.speak(utterThis), 50); 
+        }
+        
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            const silentSound = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhIAAAAAA=";
+            const audio = new Audio(silentSound);
+            audio.play().catch(e => console.warn("Audio unlock failed, will try again."));
+            audioUnlocked = true;
         }
 
         // --- TOAST NOTIFICATION ---
@@ -260,22 +261,19 @@
             // --- TIMER LOGIC ---
             function startRoundTimer() {
                 if (roundTimer) clearInterval(roundTimer);
-
                 let timeLeft = ROUND_DURATION;
                 const timerDisplay = document.getElementById('timer-display');
                 timerDisplay.textContent = timeLeft;
-                timerDisplay.classList.remove('text-red-500'); // Reset color
+                timerDisplay.classList.remove('text-red-500');
 
                 roundTimer = setInterval(async () => {
                     timeLeft--;
                     timerDisplay.textContent = timeLeft;
-                    if (timeLeft <= 3) {
-                         timerDisplay.classList.add('text-red-500');
-                    }
+                    if (timeLeft <= 3) timerDisplay.classList.add('text-red-500');
+                    
                     if (timeLeft <= 0) {
                         clearInterval(roundTimer);
                         roundTimer = null;
-                        
                         const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
                         const gameDocSnap = await getDoc(gameRef);
                         if (gameDocSnap.exists() && gameDocSnap.data().gameState === 'round') {
@@ -291,7 +289,6 @@
                 document.getElementById(screenId).classList.add('active');
             }
 
-            // --- Handle Join Link on Page Load ---
             try {
                 const urlParams = new URLSearchParams(window.location.search);
                 const joinCode = urlParams.get('join');
@@ -305,35 +302,34 @@
                 console.error("Could not process join link:", e);
             }
             
-            document.getElementById('show-host-setup-btn').addEventListener('click', () => showScreen('host-setup-screen'));
-            document.getElementById('show-join-setup-btn').addEventListener('click', () => showScreen('join-setup-screen'));
+            document.getElementById('show-host-setup-btn').addEventListener('click', () => {
+                unlockAudio();
+                showScreen('host-setup-screen');
+            });
+            document.getElementById('show-join-setup-btn').addEventListener('click', () => {
+                unlockAudio();
+                showScreen('join-setup-screen');
+            });
             document.querySelectorAll('.back-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
-                    if(isHost && currentGameId) {
-                        await deleteGame(currentGameId);
-                    }
+                    if(isHost && currentGameId) await deleteGame(currentGameId);
                     resetLocalState();
                     showScreen('home-screen');
                 });
             });
 
             // --- HOST LOGIC ---
-            const createGameBtn = document.getElementById('create-game-btn');
-            const wordListInput = document.getElementById('word-list');
-            const wordCountError = document.getElementById('word-count-error');
-
-            createGameBtn.addEventListener('click', async () => {
-                const words = [...new Set(wordListInput.value.split(',').map(w => w.trim().toLowerCase()).filter(Boolean))];
+            document.getElementById('create-game-btn').addEventListener('click', async () => {
+                const words = [...new Set(document.getElementById('word-list').value.split(',').map(w => w.trim().toLowerCase()).filter(Boolean))];
                 if(words.length < 4) {
-                    wordCountError.classList.remove('hidden');
+                    document.getElementById('word-count-error').classList.remove('hidden');
                     return;
                 }
-                wordCountError.classList.add('hidden');
+                document.getElementById('word-count-error').classList.add('hidden');
 
                 isHost = true;
                 const gameCode = generateGameCode();
-                const gameRef = collection(db, `artifacts/${appId}/public/data/games`);
-                const gameDoc = await addDoc(gameRef, {
+                const gameDoc = await addDoc(collection(db, `artifacts/${appId}/public/data/games`), {
                     hostId: currentUserId,
                     gameCode: gameCode,
                     words: words,
@@ -348,25 +344,17 @@
 
             async function deleteGame(gameId) {
                 const batch = writeBatch(db);
-                const playersRef = collection(db, `artifacts/${appId}/public/data/games/${gameId}/players`);
-                const playersSnapshot = await getDocs(playersRef);
-                playersSnapshot.forEach(playerDoc => {
-                    batch.delete(playerDoc.ref);
-                });
-                const gameRef = doc(db, `artifacts/${appId}/public/data/games/${gameId}`);
-                batch.delete(gameRef);
+                const playersSnapshot = await getDocs(collection(db, `artifacts/${appId}/public/data/games/${gameId}/players`));
+                playersSnapshot.forEach(playerDoc => batch.delete(playerDoc.ref));
+                batch.delete(doc(db, `artifacts/${appId}/public/data/games/${gameId}`));
                 await batch.commit();
             }
 
             // --- PLAYER LOGIC ---
-            const joinGameBtn = document.getElementById('join-game-btn');
-            const playerNameInput = document.getElementById('player-name-input');
-            const gameCodeInput = document.getElementById('game-code-input');
-            const joinError = document.getElementById('join-error');
-            
-            joinGameBtn.addEventListener('click', async () => {
-                const playerName = playerNameInput.value.trim().toUpperCase();
-                const gameCode = gameCodeInput.value.trim().toUpperCase();
+            document.getElementById('join-game-btn').addEventListener('click', async () => {
+                const playerName = document.getElementById('player-name-input').value.trim().toUpperCase();
+                const gameCode = document.getElementById('game-code-input').value.trim().toUpperCase();
+                const joinError = document.getElementById('join-error');
 
                 if(!playerName || !gameCode) {
                     joinError.textContent = "Please enter your name and a game code.";
@@ -374,12 +362,11 @@
                     return;
                 }
 
-                const gamesRef = collection(db, `artifacts/${appId}/public/data/games`);
-                const q = query(gamesRef, where("gameCode", "==", gameCode));
+                const q = query(collection(db, `artifacts/${appId}/public/data/games`), where("gameCode", "==", gameCode));
                 const querySnapshot = await getDocs(q);
 
                 if (querySnapshot.empty) {
-                    joinError.textContent = "Game not found. Check the code and try again.";
+                    joinError.textContent = "Game not found. Check the code.";
                     joinError.classList.remove('hidden');
                     return;
                 }
@@ -392,8 +379,7 @@
                 }
 
                 currentGameId = gameDoc.id;
-                const playersRef = collection(db, `artifacts/${appId}/public/data/games/${currentGameId}/players`);
-                const playerDoc = await addDoc(playersRef, {
+                const playerDoc = await addDoc(collection(db, `artifacts/${appId}/public/data/games/${currentGameId}/players`), {
                     name: playerName,
                     score: 0,
                     answered: false,
@@ -409,14 +395,13 @@
             function listenToGame(gameId) {
                 if (gameUnsubscribe) gameUnsubscribe();
                 gameUnsubscribe = onSnapshot(doc(db, `artifacts/${appId}/public/data/games/${gameId}`), (doc) => {
-                    const gameData = doc.data();
-                    if (!gameData) {
+                    if (!doc.exists()) {
                         showToast("The host has ended the game.");
                         resetLocalState();
                         showScreen('home-screen');
                         return;
                     }
-                    updateGameUI(gameData);
+                    updateGameUI(doc.data());
                 });
 
                 if (playersUnsubscribe) playersUnsubscribe();
@@ -426,14 +411,10 @@
 
                     if (isHost && players.length > 0) {
                         const allAnswered = players.every(p => p.answered);
-                        const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
-                        getDoc(gameRef).then(gameDocSnap => {
+                        getDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`)).then(gameDocSnap => {
                             if (gameDocSnap.exists() && gameDocSnap.data().gameState === 'round' && allAnswered) {
-                                if (roundTimer) {
-                                    clearInterval(roundTimer);
-                                    roundTimer = null;
-                                }
-                                updateDoc(gameRef, { gameState: 'leaderboard' });
+                                if (roundTimer) { clearInterval(roundTimer); roundTimer = null; }
+                                updateDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`), { gameState: 'leaderboard' });
                             }
                         });
                     }
@@ -453,49 +434,47 @@
                     new QRious({ element: document.getElementById('qr-code'), value: joinLink, size: 150 });
                     document.getElementById('game-code-display').onclick = () => {
                         navigator.clipboard.writeText(gameData.gameCode);
-                        showToast("Game code copied to clipboard!");
+                        showToast("Game code copied!");
                     };
                 }
+                
                 if (gameData.gameState === 'round') {
                     document.getElementById('host-game-view').style.display = isHost ? 'block' : 'none';
                     document.getElementById('player-game-view').style.display = !isHost ? 'block' : 'none';
                     
-                    if(isHost) {
+                    if (isHost && lastPlayedRound !== gameData.currentRound) {
+                        lastPlayedRound = gameData.currentRound;
                         document.getElementById('host-round-number').textContent = gameData.currentRound + 1;
                         speak(gameData.words[gameData.currentRound]);
                         startRoundTimer();
-                    } else {
+                    } else if (!isHost && lastRenderedRound !== gameData.currentRound) {
+                        lastRenderedRound = gameData.currentRound;
                         renderPlayerCards(gameData.words, gameData.words[gameData.currentRound]);
                     }
                     showScreen('game-screen');
                 }
-                if(gameData.gameState === 'leaderboard') {
-                    if(isHost) {
-                        document.getElementById('correct-word-display').textContent = gameData.words[gameData.currentRound];
-                        const isLastRound = gameData.currentRound >= gameData.words.length - 1;
-                        const nextBtn = document.getElementById('next-round-btn');
-                        nextBtn.textContent = isLastRound ? 'Show Final Results' : 'Next Round';
-                        showScreen('leaderboard-screen');
-                    }
+
+                if(gameData.gameState === 'leaderboard' && isHost) {
+                    document.getElementById('correct-word-display').textContent = gameData.words[gameData.currentRound];
+                    const isLastRound = gameData.currentRound >= gameData.words.length - 1;
+                    document.getElementById('next-round-btn').textContent = isLastRound ? 'Show Final Results' : 'Next Round';
+                    showScreen('leaderboard-screen');
                 }
+                
                 if(gameData.gameState === 'finished') {
                     showScreen('end-screen');
                 }
             }
 
             function updatePlayersUI(players) {
-                // Sort players and render podium for everyone
                 players.sort((a, b) => b.score - a.score);
                 renderPodium(players);
 
                 if(isHost) {
-                    const lobbyList = document.getElementById('player-list-lobby');
-                    lobbyList.innerHTML = players.map(p => `<div class="bg-white p-2 rounded shadow-sm">${p.name}</div>`).join('');
+                    document.getElementById('player-list-lobby').innerHTML = players.map(p => `<div class="bg-white p-2 rounded shadow-sm">${p.name}</div>`).join('');
                     document.getElementById('player-count').textContent = players.length;
                     document.getElementById('start-game-btn').disabled = players.length === 0;
-
-                    const leaderboardDiv = document.getElementById('leaderboard');
-                    leaderboardDiv.innerHTML = players.map(p => `
+                    document.getElementById('leaderboard').innerHTML = players.map(p => `
                         <div class="flex justify-between items-center p-2 rounded ${p.isCorrect ? 'bg-green-100' : p.answered ? 'bg-red-100' : 'bg-white'}">
                             <span>${p.name}</span>
                             <span class="font-bold">${p.score}</span>
@@ -506,8 +485,7 @@
             // --- IN-GAME ACTIONS ---
             document.getElementById('start-game-btn').addEventListener('click', () => {
                 updateDoc(doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`), { 
-                    gameState: 'round',
-                    firstCorrectAnswerGiven: false 
+                    gameState: 'round', firstCorrectAnswerGiven: false 
                 });
             });
 
@@ -516,13 +494,11 @@
                 const gameDocSnap = await getDoc(gameRef);
                 const gameData = gameDocSnap.data();
 
-                const isLastRound = gameData.currentRound >= gameData.words.length - 1;
-                if(isLastRound) {
+                if (gameData.currentRound >= gameData.words.length - 1) {
                     updateDoc(gameRef, { gameState: 'finished' });
                 } else {
-                    const playersRef = collection(db, `artifacts/${appId}/public/data/games/${currentGameId}/players`);
                     const batch = writeBatch(db);
-                    const playersSnapshot = await getDocs(playersRef);
+                    const playersSnapshot = await getDocs(collection(db, `artifacts/${appId}/public/data/games/${currentGameId}/players`));
                     playersSnapshot.forEach(playerDoc => {
                         batch.update(playerDoc.ref, { answered: false, isCorrect: null });
                     });
@@ -538,8 +514,7 @@
             function renderPlayerCards(allWords, correctWord) {
                 const container = document.getElementById('player-word-cards');
                 container.innerHTML = '';
-                const otherWords = allWords.filter(w => w !== correctWord);
-                const options = shuffleArray(otherWords).slice(0, 3);
+                const options = shuffleArray([...allWords.filter(w => w !== correctWord)]).slice(0, 3);
                 options.push(correctWord);
                 
                 shuffleArray(options).forEach(word => {
@@ -568,30 +543,19 @@
                     await runTransaction(db, async (transaction) => {
                         const playerDoc = await transaction.get(playerRef);
                         const gameDoc = await transaction.get(gameRef);
-
-                        if (!playerDoc.exists() || !gameDoc.exists()) {
-                            throw "Game or player not found.";
-                        }
-                        if (playerDoc.data().answered) {
-                            return; // Already answered, do nothing.
-                        }
+                        if (!playerDoc.exists() || !gameDoc.exists()) throw "Game/player not found.";
+                        if (playerDoc.data().answered) return;
 
                         const isFirst = !gameDoc.data().firstCorrectAnswerGiven;
                         const scoreIncrement = isFirst ? 10 : 8;
                         const newScore = playerDoc.data().score + scoreIncrement;
 
-                        if (isFirst) {
-                            transaction.update(gameRef, { firstCorrectAnswerGiven: true });
-                        }
-                        transaction.update(playerRef, {
-                            answered: true,
-                            isCorrect: true,
-                            score: newScore
-                        });
+                        if (isFirst) transaction.update(gameRef, { firstCorrectAnswerGiven: true });
+                        transaction.update(playerRef, { answered: true, isCorrect: true, score: newScore });
                     });
                 } catch (error) {
                     console.error("Transaction failed: ", error);
-                    showToast("Could not submit answer. Please try again.");
+                    showToast("Could not submit answer.");
                 }
             }
 
@@ -604,46 +568,37 @@
 
                 const topThree = sortedPlayers.slice(0, 3);
                 const podiumOrder = [
-                    { player: topThree.find((p, i) => i === 1), rank: 2, color: 'bg-slate-400', height: 'h-40' },
-                    { player: topThree.find((p, i) => i === 0), rank: 1, color: 'bg-yellow-400', height: 'h-56' },
-                    { player: topThree.find((p, i) => i === 2), rank: 3, color: 'bg-orange-400', height: 'h-32' }
+                    { player: topThree[1], rank: 2, color: 'bg-slate-400', height: 'h-40' },
+                    { player: topThree[0], rank: 1, color: 'bg-yellow-400', height: 'h-56' },
+                    { player: topThree[2], rank: 3, color: 'bg-orange-400', height: 'h-32' }
                 ];
                 
                 podiumContainer.innerHTML = podiumOrder.map(item => {
-                    if (!item.player) return `<div class="w-1/3"></div>`; // Empty spot if not enough players
+                    if (!item.player) return `<div class="w-1/3"></div>`;
                     const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : '🥉';
-                    return `
-                        <div class="w-1/3 flex flex-col items-center justify-end">
+                    return `<div class="w-1/3 flex flex-col items-center justify-end">
                             <p class="font-bold text-lg">${item.player.name}</p>
                             <p class="text-xl">${medal}</p>
                             <div class="${item.color} w-full rounded-t-lg flex items-center justify-center p-2 ${item.height}">
                                 <p class="text-2xl font-extrabold text-white">${item.player.score}</p>
                             </div>
-                        </div>
-                    `;
+                        </div>`;
                 }).join('');
 
                 const otherPlayers = sortedPlayers.slice(3);
                 if (otherPlayers.length > 0) {
-                     otherPlayersList.innerHTML = `
-                        <h4 class="font-bold text-lg mb-2">Rest of the Players</h4>
+                     otherPlayersList.innerHTML = `<h4 class="font-bold text-lg mb-2">Rest of the Players</h4>
                         <div class="space-y-2">
-                            ${otherPlayers.map((p, i) => `
-                                <div class="flex justify-between items-center p-2 rounded bg-gray-100">
+                            ${otherPlayers.map((p, i) => `<div class="flex justify-between items-center p-2 rounded bg-gray-100">
                                     <span>${i + 4}. ${p.name}</span>
                                     <span class="font-bold">${p.score}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    `;
+                                </div>`).join('')}
+                        </div>`;
                 }
             }
 
             // --- UTILITIES ---
-            function generateGameCode() {
-                return Math.random().toString(36).substring(2, 8).toUpperCase();
-            }
-            
+            function generateGameCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
             function shuffleArray(array) {
                 for (let i = array.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
@@ -658,14 +613,15 @@
                 currentGameId = null;
                 currentPlayerId = null;
                 isHost = false;
+                lastPlayedRound = -1;
+                lastRenderedRound = -1;
             }
             
             document.getElementById('host-listen-btn').addEventListener('click', async () => {
                 const gameRef = doc(db, `artifacts/${appId}/public/data/games/${currentGameId}`);
                 const gameDocSnap = await getDoc(gameRef);
-                const gameData = gameDocSnap.data();
-                if(gameData && gameData.gameState === 'round') {
-                    speak(gameData.words[gameData.currentRound]);
+                if(gameDocSnap.exists() && gameDocSnap.data().gameState === 'round') {
+                    speak(gameDocSnap.data().words[gameDocSnap.data().currentRound]);
                 }
             });
         }
