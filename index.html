@@ -65,7 +65,7 @@
                 <button id="show-join-setup-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 transition transform hover:scale-105 shadow-lg">Join a Game</button>
             </div>
             <div class="mt-8 text-center text-sm text-gray-500">
-                <p>Created by Gemini</p>
+                <p>Made by Ruth Yeh</p>
             </div>
         </div>
 
@@ -216,7 +216,7 @@
             synth.cancel();
             const utterThis = new SpeechSynthesisUtterance(text);
             if (selectedVoice) utterThis.voice = selectedVoice;
-            utterThis.rate = 0.9;
+            utterThis.rate = 0.7; // Adjusted speech rate to 70%
             setTimeout(() => synth.speak(utterThis), 50); 
         }
         
@@ -628,4 +628,3 @@
     </script>
 </body>
 </html>
-
